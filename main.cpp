@@ -49,7 +49,7 @@
 #include <sys/xattr.h>
 #endif
 
-Cache cache_("/", "/home/clrn/cachefs/cache", "/home/clrn/cachefs/src");
+Cache cache_("/media/clrn", "/home/clrn/cachefs/cache", "/media/clrn/ssd/git");
 
 static void *xmp_init(fuse_conn_info *conn,
                       fuse_config *cfg)
