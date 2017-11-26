@@ -8,295 +8,150 @@
 #include <cstring>
 #include <unistd.h>
 #include <cstdio>
+#include <memory>
+#include <vector>
+#include <mutex>
 
 #include <boost/filesystem.hpp>
+#include <boost/shared_ptr.hpp>
+#include <boost/unordered_map.hpp>
+
+#include "ReadWriteCache.h"
+#include "ReadOnlyCache.h"
 
 class Cache
 {
 public:
-    Cache(const boost::filesystem::path& src, const boost::filesystem::path& cache)
-        : src_(src)
-        , cache_(cache)
+    Cache(const boost::filesystem::path& src,
+          const boost::filesystem::path& cache,
+          const boost::filesystem::path& readWrite)
+        : src_(boost::filesystem::system_complete(src))
+        , cache_(boost::filesystem::system_complete(cache))
+        , readWrite_(boost::filesystem::system_complete(readWrite))
+        , readOnlyCache_(src, cache, readWrite)
+        , readWriteCache_(src, cache, readWrite)
     {
     }
 
-    int getattr(const char *path, struct stat *stbuf,
-                           struct fuse_file_info *fi)
+    bool isReadOnly(const char* path)
     {
-        (void) fi;
-        int res;
+        const auto full = src_ / path;
+        return readWrite_.string().find(full.string()) == std::string::npos;
+    }
 
-        res = lstat(path, stbuf);
-        if (res == -1)
-            return -errno;
-
-        return 0;
+    int getattr(const char *path, struct stat *stbuf, struct fuse_file_info *fi)
+    {
+        return isReadOnly(path) ? readOnlyCache_.getattr(path, stbuf, fi) : readWriteCache_.getattr(path, stbuf, fi);
     }
 
     int access(const char *path, int mask)
     {
-        int res;
-
-        res = ::access(path, mask);
-        if (res == -1)
-            return -errno;
-
-        return 0;
+        return isReadOnly(path) ? readOnlyCache_.access(path, mask) : readWriteCache_.access(path, mask);
     }
 
     int readlink(const char *path, char *buf, size_t size)
     {
-        int res;
-
-        res = ::readlink(path, buf, size - 1);
-        if (res == -1)
-            return -errno;
-
-        buf[res] = '\0';
-        return 0;
+        return isReadOnly(path) ? readOnlyCache_.readlink(path, buf, size) : readWriteCache_.readlink(path, buf, size);
     }
 
-
-    int list(const char *path, void *buf, fuse_fill_dir_t filler,
-                           off_t offset, struct fuse_file_info *fi,
-                           enum fuse_readdir_flags flags)
+    int list(const char* path,
+             void* buf,
+             fuse_fill_dir_t filler,
+             off_t offset,
+             struct fuse_file_info* fi,
+             enum fuse_readdir_flags flags)
     {
-        DIR *dp;
-        struct dirent *de;
-
-        (void) offset;
-        (void) fi;
-        (void) flags;
-
-        dp = opendir(path);
-        if (dp == NULL)
-            return -errno;
-
-        while ((de = readdir(dp)) != NULL) {
-            struct stat st;
-            memset(&st, 0, sizeof(st));
-            st.st_ino = de->d_ino;
-            st.st_mode = de->d_type << 12;
-            if (filler(buf, de->d_name, &st, 0, static_cast<fuse_fill_dir_flags>(0)))
-                break;
-        }
-
-        closedir(dp);
-        return 0;
+        return isReadOnly(path) ? readOnlyCache_.list(path, buf, filler, offset, fi, flags) : readWriteCache_.list(path, buf, filler, offset, fi, flags);
     }
 
     int mknod(const char *path, mode_t mode, dev_t rdev)
     {
-        int res;
-
-        /* On Linux this could just be 'mknod(path, mode, rdev)' but this
-           is more portable */
-        if (S_ISREG(mode)) {
-            res = ::open(path, O_CREAT | O_EXCL | O_WRONLY, mode);
-            if (res >= 0)
-                res = close(res);
-        } else if (S_ISFIFO(mode))
-            res = mkfifo(path, mode);
-        else
-            res = mknod(path, mode, rdev);
-        if (res == -1)
-            return -errno;
-
-        return 0;
+        return isReadOnly(path) ? readOnlyCache_.mknod(path, mode, rdev) : readWriteCache_.mknod(path, mode, rdev);
     }
 
     int mkdir(const char *path, mode_t mode)
     {
-        int res;
-
-        res = mkdir(path, mode);
-        if (res == -1)
-            return -errno;
-
-        return 0;
+        return isReadOnly(path) ? readOnlyCache_.mkdir(path, mode) : readWriteCache_.mkdir(path, mode);
     }
 
     int unlink(const char *path)
     {
-        int res;
-
-        res = unlink(path);
-        if (res == -1)
-            return -errno;
-
-        return 0;
+        return isReadOnly(path) ? readOnlyCache_.unlink(path) : readWriteCache_.unlink(path);
     }
 
     int rmdir(const char *path)
     {
-        int res;
-
-        res = rmdir(path);
-        if (res == -1)
-            return -errno;
-
-        return 0;
+        return isReadOnly(path) ? readOnlyCache_.rmdir(path) : readWriteCache_.rmdir(path);
     }
 
     int symlink(const char *from, const char *to)
     {
-        int res;
-
-        res = symlink(from, to);
-        if (res == -1)
-            return -errno;
-
-        return 0;
+        return isReadOnly(from) ? readOnlyCache_.symlink(from, to) : readWriteCache_.symlink(from, to);
     }
 
     int rename(const char *from, const char *to, unsigned int flags)
     {
-        int res;
-
-        if (flags)
-            return -EINVAL;
-
-        res = ::rename(from, to);
-        if (res == -1)
-            return -errno;
-
-        return 0;
+        return isReadOnly(from) ? readOnlyCache_.rename(from, to, flags) : readWriteCache_.rename(from, to, flags);
     }
 
     int link(const char *from, const char *to)
     {
-        int res;
-
-        res = link(from, to);
-        if (res == -1)
-            return -errno;
-
-        return 0;
+        return isReadOnly(from) ? readOnlyCache_.link(from, to) : readWriteCache_.link(from, to);
     }
 
     int chmod(const char *path, mode_t mode,
                          struct fuse_file_info *fi)
     {
-        (void) fi;
-        int res;
-
-        res = ::chmod(path, mode);
-        if (res == -1)
-            return -errno;
-
-        return 0;
+        return isReadOnly(path) ? readOnlyCache_.chmod(path, mode, fi) : readWriteCache_.chmod(path, mode, fi);
     }
 
     int chown(const char *path, uid_t uid, gid_t gid,
                          struct fuse_file_info *fi)
     {
-        (void) fi;
-        int res;
-
-        res = lchown(path, uid, gid);
-        if (res == -1)
-            return -errno;
-
-        return 0;
+        return isReadOnly(path) ? readOnlyCache_.chown(path, uid, gid, fi) : readWriteCache_.chown(path, uid, gid, fi);
     }
 
     int truncate(const char *path, off_t size,
                             struct fuse_file_info *fi)
     {
-        int res;
-
-        if (fi != NULL)
-            res = ftruncate(fi->fh, size);
-        else
-            res = ::truncate(path, size);
-        if (res == -1)
-            return -errno;
-
-        return 0;
+        return isReadOnly(path) ? readOnlyCache_.truncate(path, size, fi) : readWriteCache_.truncate(path, size, fi);
     }
 
     int create(const char *path, mode_t mode,
                           struct fuse_file_info *fi)
     {
-        int res;
-
-        res = ::open(path, fi->flags, mode);
-        if (res == -1)
-            return -errno;
-
-        fi->fh = res;
-        return 0;
+        return isReadOnly(path) ? readOnlyCache_.create(path, mode, fi) : readWriteCache_.create(path, mode, fi);
     }
 
     int open(const char *path, struct fuse_file_info *fi)
     {
-        int res;
-
-        res = ::open(path, fi->flags);
-        if (res == -1)
-            return -errno;
-
-        fi->fh = res;
-        return 0;
+        return isReadOnly(path) ? readOnlyCache_.open(path, fi) : readWriteCache_.open(path, fi);
     }
 
     int read(const char *path, char *buf, size_t size, off_t offset,
                         struct fuse_file_info *fi)
     {
-        int fd;
-        int res;
-
-        if(fi == NULL)
-            fd = open(path, O_RDONLY);
-        else
-            fd = fi->fh;
-
-        if (fd == -1)
-            return -errno;
-
-        res = pread(fd, buf, size, offset);
-        if (res == -1)
-            res = -errno;
-
-        if(fi == NULL)
-            close(fd);
-        return res;
+        return isReadOnly(path) ? readOnlyCache_.read(path, buf, size, offset, fi) : readWriteCache_.read(path, buf, size, offset, fi);
     }
 
     int write(const char *path, const char *buf, size_t size,
                          off_t offset, struct fuse_file_info *fi)
     {
-        int fd;
-        int res;
-
-        (void) fi;
-        if(fi == NULL)
-            fd = ::open(path, O_WRONLY);
-        else
-            fd = fi->fh;
-
-        if (fd == -1)
-            return -errno;
-
-        res = pwrite(fd, buf, size, offset);
-        if (res == -1)
-            res = -errno;
-
-        if(fi == NULL)
-            close(fd);
-        return res;
+        return isReadOnly(path) ? readOnlyCache_.write(path, buf, size, offset, fi) : readWriteCache_.write(path, buf, size, offset, fi);
     }
 
     int release(const char *path, struct fuse_file_info *fi)
     {
-        (void) path;
-        close(fi->fh);
-        return 0;
+        return isReadOnly(path) ? readOnlyCache_.release(path, fi) : readWriteCache_.release(path, fi);
     }
 
 
 private:
     const boost::filesystem::path src_;
     const boost::filesystem::path cache_;
+    const boost::filesystem::path readWrite_;
+
+    ReadOnlyCache readOnlyCache_;
+    ReadWriteCache readWriteCache_;
 };
 
