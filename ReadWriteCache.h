@@ -15,6 +15,7 @@
 #include <boost/filesystem.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/unordered_map.hpp>
+#include <boost/algorithm/string/replace.hpp>
 
 class ReadWriteCache
 {
@@ -28,6 +29,19 @@ public:
     {
     }
 
+    void copyDirectoryRecursively(const boost::filesystem::path& sourceDir, const boost::filesystem::path& destinationDir)
+    {
+        namespace fs = boost::filesystem;
+
+        for (const auto& dirEnt : fs::recursive_directory_iterator{sourceDir})
+        {
+            const auto& path = dirEnt.path();
+            auto relativePathStr = path.string();
+            boost::replace_first(relativePathStr, sourceDir.string(), "");
+            fs::copy(path, destinationDir / relativePathStr);
+        }
+    }
+
     boost::filesystem::path ensureExists(const char* path)
     {
         const auto cached = cache_ / path;
@@ -36,7 +50,20 @@ public:
             return cached;
 
         const auto full = src_ / path;
-        boost::filesystem::copy(full, cached);
+        if (!boost::filesystem::exists(full))
+            return cached;
+
+        if (!boost::filesystem::is_directory(full))
+        {
+            boost::filesystem::create_directories(cached.parent_path());
+            boost::filesystem::copy(full, cached);
+        }
+        else
+        {
+            boost::filesystem::create_directories(cached);
+            copyDirectoryRecursively(full, cached);
+        }
+
         return cached;
     }
 
@@ -48,7 +75,7 @@ public:
             return cached;
 
         const auto full = (src_ / path).parent_path();
-        boost::filesystem::copy(full, cached);
+        ensureExists(full.c_str());
         return cached;
     }
 

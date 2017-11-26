@@ -33,10 +33,17 @@ public:
     {
     }
 
-    bool isReadOnly(const char* path)
+    bool isReadWrite(const char* path)
     {
         const auto full = src_ / path;
-        return readWrite_.string().find(full.string()) == std::string::npos;
+        return
+            full.string().size() >= readWrite_.string().size() &&
+            full.string().find(readWrite_.string()) == 0;
+    }
+
+    bool isReadOnly(const char* path)
+    {
+        return !isReadWrite(path);
     }
 
     int getattr(const char *path, struct stat *stbuf, struct fuse_file_info *fi)

@@ -138,7 +138,7 @@ public:
             DIR *dp;
             struct dirent *de;
 
-            dp = opendir(path);
+            dp = opendir(full.c_str());
             if (dp == NULL)
             {
                 entry->listResult_ = -errno;
