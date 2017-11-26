@@ -43,10 +43,13 @@
 #include <dirent.h>
 #include <errno.h>
 #include <sys/time.h>
+#include "Cache.h"
+
 #ifdef HAVE_SETXATTR
 #include <sys/xattr.h>
 #endif
 
+Cache cache_("~/cachefs/src", "~/cachefs/cache");
 
 static void *xmp_init(fuse_conn_info *conn,
                       fuse_config *cfg)
@@ -71,37 +74,17 @@ static void *xmp_init(fuse_conn_info *conn,
 static int xmp_getattr(const char *path, struct stat *stbuf,
                        struct fuse_file_info *fi)
 {
-    (void) fi;
-    int res;
-
-    res = lstat(path, stbuf);
-    if (res == -1)
-        return -errno;
-
-    return 0;
+    return cache_.getattr(path, stbuf, fi);
 }
 
 static int xmp_access(const char *path, int mask)
 {
-    int res;
-
-    res = access(path, mask);
-    if (res == -1)
-        return -errno;
-
-    return 0;
+    return cache_.access(path, mask);
 }
 
 static int xmp_readlink(const char *path, char *buf, size_t size)
 {
-    int res;
-
-    res = readlink(path, buf, size - 1);
-    if (res == -1)
-        return -errno;
-
-    buf[res] = '\0';
-    return 0;
+    return cache_.readlink(path, buf, size);
 }
 
 
@@ -109,158 +92,60 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                        off_t offset, struct fuse_file_info *fi,
                        enum fuse_readdir_flags flags)
 {
-    DIR *dp;
-    struct dirent *de;
-
-    (void) offset;
-    (void) fi;
-    (void) flags;
-
-    dp = opendir(path);
-    if (dp == NULL)
-        return -errno;
-
-    while ((de = readdir(dp)) != NULL) {
-        struct stat st;
-        memset(&st, 0, sizeof(st));
-        st.st_ino = de->d_ino;
-        st.st_mode = de->d_type << 12;
-        if (filler(buf, de->d_name, &st, 0, static_cast<fuse_fill_dir_flags>(0)))
-            break;
-    }
-
-    closedir(dp);
-    return 0;
+    return cache_.list(path, buf, filler, offset, fi, flags);
 }
 
 static int xmp_mknod(const char *path, mode_t mode, dev_t rdev)
 {
-    int res;
-
-    /* On Linux this could just be 'mknod(path, mode, rdev)' but this
-       is more portable */
-    if (S_ISREG(mode)) {
-        res = open(path, O_CREAT | O_EXCL | O_WRONLY, mode);
-        if (res >= 0)
-            res = close(res);
-    } else if (S_ISFIFO(mode))
-        res = mkfifo(path, mode);
-    else
-        res = mknod(path, mode, rdev);
-    if (res == -1)
-        return -errno;
-
-    return 0;
+    return cache_.mknod(path, mode, rdev);
 }
 
 static int xmp_mkdir(const char *path, mode_t mode)
 {
-    int res;
-
-    res = mkdir(path, mode);
-    if (res == -1)
-        return -errno;
-
-    return 0;
+    return cache_.mkdir(path, mode);
 }
 
 static int xmp_unlink(const char *path)
 {
-    int res;
-
-    res = unlink(path);
-    if (res == -1)
-        return -errno;
-
-    return 0;
+    return cache_.unlink(path);
 }
 
 static int xmp_rmdir(const char *path)
 {
-    int res;
-
-    res = rmdir(path);
-    if (res == -1)
-        return -errno;
-
-    return 0;
+    return cache_.rmdir(path);
 }
 
 static int xmp_symlink(const char *from, const char *to)
 {
-    int res;
-
-    res = symlink(from, to);
-    if (res == -1)
-        return -errno;
-
-    return 0;
+    return cache_.symlink(from, to);
 }
 
 static int xmp_rename(const char *from, const char *to, unsigned int flags)
 {
-    int res;
-
-    if (flags)
-        return -EINVAL;
-
-    res = rename(from, to);
-    if (res == -1)
-        return -errno;
-
-    return 0;
+    return cache_.rename(from, to, flags);
 }
 
 static int xmp_link(const char *from, const char *to)
 {
-    int res;
-
-    res = link(from, to);
-    if (res == -1)
-        return -errno;
-
-    return 0;
+    return cache_.link(from, to);
 }
 
 static int xmp_chmod(const char *path, mode_t mode,
                      struct fuse_file_info *fi)
 {
-    (void) fi;
-    int res;
-
-    res = chmod(path, mode);
-    if (res == -1)
-        return -errno;
-
-    return 0;
+    return cache_.chmod(path, mode, fi);
 }
 
 static int xmp_chown(const char *path, uid_t uid, gid_t gid,
                      struct fuse_file_info *fi)
 {
-    (void) fi;
-    int res;
-
-    res = lchown(path, uid, gid);
-    if (res == -1)
-        return -errno;
-
-    return 0;
+    return cache_.chown(path, uid, gid, fi);
 }
 
 static int xmp_truncate(const char *path, off_t size,
                         struct fuse_file_info *fi)
 {
-    int res;
-
-    if (fi != NULL)
-        res = ftruncate(fi->fh, size);
-    else
-        res = truncate(path, size);
-    if (res == -1)
-        return -errno;
-
-    return 0;
+    return cache_.truncate(path, size, fi);
 }
 
 #ifdef HAVE_UTIMENSAT
@@ -282,73 +167,24 @@ static int xmp_utimens(const char *path, const struct timespec ts[2],
 static int xmp_create(const char *path, mode_t mode,
                       struct fuse_file_info *fi)
 {
-    int res;
-
-    res = open(path, fi->flags, mode);
-    if (res == -1)
-        return -errno;
-
-    fi->fh = res;
-    return 0;
+    return cache_.create(path, mode, fi);
 }
 
 static int xmp_open(const char *path, struct fuse_file_info *fi)
 {
-    int res;
-
-    res = open(path, fi->flags);
-    if (res == -1)
-        return -errno;
-
-    fi->fh = res;
-    return 0;
+    return cache_.open(path, fi);
 }
 
 static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
                     struct fuse_file_info *fi)
 {
-    int fd;
-    int res;
-
-    if(fi == NULL)
-        fd = open(path, O_RDONLY);
-    else
-        fd = fi->fh;
-
-    if (fd == -1)
-        return -errno;
-
-    res = pread(fd, buf, size, offset);
-    if (res == -1)
-        res = -errno;
-
-    if(fi == NULL)
-        close(fd);
-    return res;
+    return cache_.read(path, buf, size, offset, fi);
 }
 
 static int xmp_write(const char *path, const char *buf, size_t size,
                      off_t offset, struct fuse_file_info *fi)
 {
-    int fd;
-    int res;
-
-    (void) fi;
-    if(fi == NULL)
-        fd = open(path, O_WRONLY);
-    else
-        fd = fi->fh;
-
-    if (fd == -1)
-        return -errno;
-
-    res = pwrite(fd, buf, size, offset);
-    if (res == -1)
-        res = -errno;
-
-    if(fi == NULL)
-        close(fd);
-    return res;
+    return cache_.write(path, buf, size, offset, fi);
 }
 
 static int xmp_statfs(const char *path, struct statvfs *stbuf)
@@ -364,9 +200,7 @@ static int xmp_statfs(const char *path, struct statvfs *stbuf)
 
 static int xmp_release(const char *path, struct fuse_file_info *fi)
 {
-    (void) path;
-    close(fi->fh);
-    return 0;
+    return cache_.release(path, fi);
 }
 
 static int xmp_fsync(const char *path, int isdatasync,
