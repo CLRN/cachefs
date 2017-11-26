@@ -49,7 +49,9 @@
 #include <sys/xattr.h>
 #endif
 
-Cache cache_("/media/clrn", "/home/clrn/cachefs/cache", "/media/clrn/ssd/git");
+#include <boost/algorithm/string/trim.hpp>
+
+std::unique_ptr<Cache> cache_;
 
 static void *xmp_init(fuse_conn_info *conn,
                       fuse_config *cfg)
@@ -74,17 +76,17 @@ static void *xmp_init(fuse_conn_info *conn,
 static int xmp_getattr(const char *path, struct stat *stbuf,
                        struct fuse_file_info *fi)
 {
-    return cache_.getattr(path, stbuf, fi);
+    return cache_->getattr(path, stbuf, fi);
 }
 
 static int xmp_access(const char *path, int mask)
 {
-    return cache_.access(path, mask);
+    return cache_->access(path, mask);
 }
 
 static int xmp_readlink(const char *path, char *buf, size_t size)
 {
-    return cache_.readlink(path, buf, size);
+    return cache_->readlink(path, buf, size);
 }
 
 
@@ -92,60 +94,60 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                        off_t offset, struct fuse_file_info *fi,
                        enum fuse_readdir_flags flags)
 {
-    return cache_.list(path, buf, filler, offset, fi, flags);
+    return cache_->list(path, buf, filler, offset, fi, flags);
 }
 
 static int xmp_mknod(const char *path, mode_t mode, dev_t rdev)
 {
-    return cache_.mknod(path, mode, rdev);
+    return cache_->mknod(path, mode, rdev);
 }
 
 static int xmp_mkdir(const char *path, mode_t mode)
 {
-    return cache_.mkdir(path, mode);
+    return cache_->mkdir(path, mode);
 }
 
 static int xmp_unlink(const char *path)
 {
-    return cache_.unlink(path);
+    return cache_->unlink(path);
 }
 
 static int xmp_rmdir(const char *path)
 {
-    return cache_.rmdir(path);
+    return cache_->rmdir(path);
 }
 
 static int xmp_symlink(const char *from, const char *to)
 {
-    return cache_.symlink(from, to);
+    return cache_->symlink(from, to);
 }
 
 static int xmp_rename(const char *from, const char *to, unsigned int flags)
 {
-    return cache_.rename(from, to, flags);
+    return cache_->rename(from, to, flags);
 }
 
 static int xmp_link(const char *from, const char *to)
 {
-    return cache_.link(from, to);
+    return cache_->link(from, to);
 }
 
 static int xmp_chmod(const char *path, mode_t mode,
                      struct fuse_file_info *fi)
 {
-    return cache_.chmod(path, mode, fi);
+    return cache_->chmod(path, mode, fi);
 }
 
 static int xmp_chown(const char *path, uid_t uid, gid_t gid,
                      struct fuse_file_info *fi)
 {
-    return cache_.chown(path, uid, gid, fi);
+    return cache_->chown(path, uid, gid, fi);
 }
 
 static int xmp_truncate(const char *path, off_t size,
                         struct fuse_file_info *fi)
 {
-    return cache_.truncate(path, size, fi);
+    return cache_->truncate(path, size, fi);
 }
 
 #ifdef HAVE_UTIMENSAT
@@ -167,24 +169,24 @@ static int xmp_utimens(const char *path, const struct timespec ts[2],
 static int xmp_create(const char *path, mode_t mode,
                       struct fuse_file_info *fi)
 {
-    return cache_.create(path, mode, fi);
+    return cache_->create(path, mode, fi);
 }
 
 static int xmp_open(const char *path, struct fuse_file_info *fi)
 {
-    return cache_.open(path, fi);
+    return cache_->open(path, fi);
 }
 
 static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
                     struct fuse_file_info *fi)
 {
-    return cache_.read(path, buf, size, offset, fi);
+    return cache_->read(path, buf, size, offset, fi);
 }
 
 static int xmp_write(const char *path, const char *buf, size_t size,
                      off_t offset, struct fuse_file_info *fi)
 {
-    return cache_.write(path, buf, size, offset, fi);
+    return cache_->write(path, buf, size, offset, fi);
 }
 
 static int xmp_statfs(const char *path, struct statvfs *stbuf)
@@ -200,7 +202,7 @@ static int xmp_statfs(const char *path, struct statvfs *stbuf)
 
 static int xmp_release(const char *path, struct fuse_file_info *fi)
 {
-    return cache_.release(path, fi);
+    return cache_->release(path, fi);
 }
 
 static int xmp_fsync(const char *path, int isdatasync,
@@ -320,5 +322,41 @@ int main(int argc, char *argv[])
 #endif
 
     umask(0);
-    return fuse_main(argc, argv, &xmp_oper, NULL);
+
+    if (argc < 5)
+    {
+        std::cerr << "not enough mount points specified, " << std::endl;
+        std::cerr << "usage: ./cachefs [options] <mountpoint> <source> <cache> <read-write-subdir>" << std::endl;
+
+        for (int i = 0; i < argc; ++i)
+        {
+            if (std::string(argv[i]) == "--help" || std::string(argv[i]) == "-h")
+                return fuse_main(argc, argv, &xmp_oper, NULL);
+        }
+    }
+
+    std::string src = argv[argc - 3];
+    std::string cache = argv[argc - 2];
+    std::string readWriteSubdir = argv[argc - 1];
+
+    boost::algorithm::trim_right_if(src, boost::algorithm::is_any_of(" /"));
+    boost::algorithm::trim_right_if(cache, boost::algorithm::is_any_of(" /"));
+    boost::algorithm::trim_right_if(readWriteSubdir, boost::algorithm::is_any_of(" /"));
+
+    std::cout << "source dir: '" << src << "'" << std::endl;
+    std::cout << "cache dir:  '" << cache << "'" << std::endl;
+    std::cout << "read-write: '" << readWriteSubdir << "'" << std::endl;
+
+    if (readWriteSubdir.size() < src.size() || readWriteSubdir.find(src) != 0)
+    {
+        std::cerr << "read-write subdir must subdirectory of source dir" << std::endl;
+        return 1;
+    }
+
+    argc -= 3;
+
+    cache_ = std::make_unique<Cache>(src, cache, readWriteSubdir);
+    const auto res = fuse_main(argc, argv, &xmp_oper, NULL);
+    cache_.reset();
+    return res;
 }

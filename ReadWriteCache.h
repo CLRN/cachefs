@@ -30,7 +30,6 @@ public:
         , readWrite_(readWrite)
         , sync_(src, cache)
     {
-        sync_.start();
     }
 
     void copyDirectoryRecursively(const boost::filesystem::path& sourceDir, const boost::filesystem::path& destinationDir)

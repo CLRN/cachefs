@@ -9,12 +9,12 @@
 #include <boost/filesystem.hpp>
 #include <boost/shared_ptr.hpp>
 
-
 class BackgroundSync
 {
 public:
     BackgroundSync(const boost::filesystem::path& remote, const boost::filesystem::path& local)
         : running_(true)
+        , started_(false)
         , remote_(remote)
         , local_(local)
     {
@@ -23,27 +23,38 @@ public:
     ~BackgroundSync()
     {
         running_ = false;
+        cond_.notify_all();
         worker_.join();
     }
 
     void start()
     {
+        if (started_)
+            return;
+
+        started_ = true;
         worker_ = std::thread(std::bind(&BackgroundSync::worker, this));
     }
 
     void flush()
     {
+        start();
+
         while (true)
         {
-            std::unique_lock<std::mutex> lock(lock_);
-            if (queue_.empty())
-                break;
+            {
+                std::unique_lock<std::mutex> lock(lock_);
+                if (queue_.empty() || !running_)
+                    break;
+            }
             std::this_thread::sleep_for(std::chrono::microseconds(1));
         }
     }
 
     void sync(const char* path)
     {
+        start();
+
         std::unique_lock<std::mutex> lock(lock_);
         queue_.emplace_back(path);
         cond_.notify_all();
@@ -60,8 +71,11 @@ private:
 
                 {
                     std::unique_lock<std::mutex> lock(lock_);
-                    while (queue_.empty())
+                    while (queue_.empty() && running_)
                         cond_.wait(lock);
+
+                    if (!running_)
+                        break;
 
                     path = std::move(queue_.front());
                     queue_.pop_front();
@@ -85,6 +99,7 @@ private:
     const boost::filesystem::path local_;
 
     bool running_;
+    bool started_;
 
     std::mutex lock_;
     std::condition_variable cond_;
