@@ -25,9 +25,9 @@ public:
     Cache(const boost::filesystem::path& src,
           const boost::filesystem::path& cache,
           const boost::filesystem::path& readWrite)
-        : src_(boost::filesystem::system_complete(src))
-        , cache_(boost::filesystem::system_complete(cache))
-        , readWrite_(boost::filesystem::system_complete(readWrite))
+        : src_(src)
+        , cache_(cache)
+        , readWrite_(readWrite)
         , readOnlyCache_(src, cache, readWrite)
         , readWriteCache_(src, cache, readWrite)
     {

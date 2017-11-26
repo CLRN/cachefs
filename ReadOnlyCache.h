@@ -53,9 +53,9 @@ public:
     ReadOnlyCache(const boost::filesystem::path& src,
           const boost::filesystem::path& cache,
           const boost::filesystem::path& readWrite)
-        : src_(boost::filesystem::system_complete(src))
-        , cache_(boost::filesystem::system_complete(cache))
-        , readWrite_(boost::filesystem::system_complete(readWrite))
+        : src_(src)
+        , cache_(cache)
+        , readWrite_(readWrite)
     {
     }
 
@@ -82,6 +82,7 @@ public:
         if (!entry->checkResult_)
             entry->checkResult_ = lstat(full.c_str(), &entry->stat_);
 
+        memcpy(stbuf, &entry->stat_, sizeof(*stbuf));
         return ret(*entry->checkResult_);
     }
 
