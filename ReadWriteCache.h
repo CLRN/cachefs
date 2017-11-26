@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Background.h"
+
 #include <errno.h>
 #include <sys/stat.h>
 #include <cstddef>
@@ -26,7 +28,9 @@ public:
         : src_(src)
         , cache_(cache)
         , readWrite_(readWrite)
+        , sync_(src, cache)
     {
+        sync_.start();
     }
 
     void copyDirectoryRecursively(const boost::filesystem::path& sourceDir, const boost::filesystem::path& destinationDir)
@@ -44,6 +48,9 @@ public:
 
     boost::filesystem::path ensureExists(const char* path)
     {
+        static std::mutex lock_;
+        std::unique_lock<std::mutex> lock(lock_);
+
         const auto cached = cache_ / path;
 
         if (boost::filesystem::exists(cached))
@@ -70,6 +77,9 @@ public:
     boost::filesystem::path ensureParentExists(const char* path)
     {
         const auto cached = cache_ / path;
+
+        static std::mutex lock_;
+        std::unique_lock<std::mutex> lock(lock_);
 
         if (boost::filesystem::exists(cached.parent_path()))
             return cached;
@@ -119,7 +129,6 @@ public:
         buf[res] = '\0';
         return 0;
     }
-
 
     int list(const char* path,
              void* buf,
@@ -179,10 +188,17 @@ public:
     int mkdir(const char *path, mode_t mode)
     {
         const auto full = ensureParentExists(path);
+        const auto remote = src_ / path;
 
         int res;
 
+        sync_.flush();
+
         res = ::mkdir(full.c_str(), mode);
+        if (res == -1)
+            return -errno;
+
+        res = ::mkdir(remote.c_str(), mode);
         if (res == -1)
             return -errno;
 
@@ -192,10 +208,17 @@ public:
     int unlink(const char *path)
     {
         const auto full = ensureExists(path);
+        const auto remote = src_ / path;
 
         int res;
 
+        sync_.flush();
+
         res = ::unlink(full.c_str());
+        if (res == -1)
+            return -errno;
+
+        res = ::unlink(remote.c_str());
         if (res == -1)
             return -errno;
 
@@ -205,10 +228,17 @@ public:
     int rmdir(const char *path)
     {
         const auto full = ensureParentExists(path);
+        const auto remote = src_ / path;
 
         int res;
 
+        sync_.flush();
+
         res = ::rmdir(full.c_str());
+        if (res == -1)
+            return -errno;
+
+        res = ::rmdir(remote.c_str());
         if (res == -1)
             return -errno;
 
@@ -221,7 +251,13 @@ public:
 
         int res;
 
+        sync_.flush();
+
         res = ::symlink(full.c_str(), (cache_ / to).c_str());
+        if (res == -1)
+            return -errno;
+
+        res = ::symlink((src_ / from).c_str(), (src_ / to).c_str());
         if (res == -1)
             return -errno;
 
@@ -237,7 +273,13 @@ public:
         if (flags)
             return -EINVAL;
 
+        sync_.flush();
+
         res = ::rename(full.c_str(), (cache_ / to).c_str());
+        if (res == -1)
+            return -errno;
+
+        res = ::rename((src_ / from).c_str(), (src_ / to).c_str());
         if (res == -1)
             return -errno;
 
@@ -248,7 +290,13 @@ public:
     {
         int res;
 
+        sync_.flush();
+
         res = ::link((cache_ / from).c_str(), (cache_ / to).c_str());
+        if (res == -1)
+            return -errno;
+
+        res = ::link((src_ / from).c_str(), (src_ / to).c_str());
         if (res == -1)
             return -errno;
 
@@ -263,7 +311,13 @@ public:
         (void) fi;
         int res;
 
+        sync_.flush();
+
         res = ::chmod(full.c_str(), mode);
+        if (res == -1)
+            return -errno;
+
+        res = ::chmod((src_ / path).c_str(), mode);
         if (res == -1)
             return -errno;
 
@@ -278,7 +332,13 @@ public:
         (void) fi;
         int res;
 
+        sync_.flush();
+
         res = lchown(full.c_str(), uid, gid);
+        if (res == -1)
+            return -errno;
+
+        res = lchown((src_ / path).c_str(), uid, gid);
         if (res == -1)
             return -errno;
 
@@ -299,6 +359,8 @@ public:
         if (res == -1)
             return -errno;
 
+        sync_.sync(path);
+
         return 0;
     }
 
@@ -309,11 +371,24 @@ public:
 
         int res;
 
+        sync_.flush();
+
         res = ::open(full.c_str(), fi->flags, mode);
         if (res == -1)
             return -errno;
 
         fi->fh = res;
+
+        res = ::open((src_ / path).c_str(), fi->flags, mode);
+        if (res == -1)
+        {
+            close(fi->fh);
+            fi->fh = 0;
+            return -errno;
+        }
+
+        close(res);
+
         return 0;
     }
 
@@ -353,6 +428,7 @@ public:
 
         if(fi == NULL)
             close(fd);
+
         return res;
     }
 
@@ -379,6 +455,7 @@ public:
 
         if(fi == NULL)
             close(fd);
+
         return res;
     }
 
@@ -386,6 +463,9 @@ public:
     {
         (void) path;
         close(fi->fh);
+
+        sync_.sync(path);
+
         return 0;
     }
 
@@ -394,5 +474,7 @@ private:
     const boost::filesystem::path src_;
     const boost::filesystem::path cache_;
     const boost::filesystem::path readWrite_;
+
+    BackgroundSync sync_;
 };
 
