@@ -36,6 +36,8 @@ public:
     {
         namespace fs = boost::filesystem;
 
+        fs::create_directories(destinationDir);
+
         for (const auto& dirEnt : fs::recursive_directory_iterator{sourceDir})
         {
             const auto& path = dirEnt.path();
@@ -45,52 +47,25 @@ public:
         }
     }
 
-    boost::filesystem::path ensureExists(const char* path)
+    boost::filesystem::path ensureCacheExists(const char* path)
     {
         static std::mutex lock_;
         std::unique_lock<std::mutex> lock(lock_);
 
         const auto cached = cache_ / path;
 
-        if (boost::filesystem::exists(cached))
-            return cached;
+        auto dest = readWrite_.string();
+        boost::algorithm::replace_first(dest, src_.string(), cache_.string());
 
-        const auto full = src_ / path;
-        if (!boost::filesystem::exists(full))
-            return cached;
+        if (!boost::filesystem::exists(dest))
+            copyDirectoryRecursively(readWrite_, dest);
 
-        if (!boost::filesystem::is_directory(full))
-        {
-            boost::filesystem::create_directories(cached.parent_path());
-            boost::filesystem::copy(full, cached);
-        }
-        else
-        {
-            boost::filesystem::create_directories(cached);
-            copyDirectoryRecursively(full, cached);
-        }
-
-        return cached;
-    }
-
-    boost::filesystem::path ensureParentExists(const char* path)
-    {
-        const auto cached = cache_ / path;
-
-        static std::mutex lock_;
-        std::unique_lock<std::mutex> lock(lock_);
-
-        if (boost::filesystem::exists(cached.parent_path()))
-            return cached;
-
-        const auto full = (src_ / path).parent_path();
-        ensureExists(full.c_str());
         return cached;
     }
 
     int getattr(const char *path, struct stat *stbuf, struct fuse_file_info *fi)
     {
-        const auto full = ensureExists(path);
+        const auto full = ensureCacheExists(path);
 
         (void) fi;
         int res;
@@ -104,7 +79,7 @@ public:
 
     int access(const char *path, int mask)
     {
-        const auto full = ensureExists(path);
+        const auto full = ensureCacheExists(path);
 
         int res;
 
@@ -117,7 +92,7 @@ public:
 
     int readlink(const char *path, char *buf, size_t size)
     {
-        const auto full = ensureExists(path);
+        const auto full = ensureCacheExists(path);
 
         int res;
 
@@ -136,7 +111,7 @@ public:
              struct fuse_file_info* fi,
              enum fuse_readdir_flags flags)
     {
-        const auto full = ensureExists(path);
+        const auto full = ensureCacheExists(path);
 
         DIR *dp;
         struct dirent *de;
@@ -164,7 +139,7 @@ public:
 
     int mknod(const char *path, mode_t mode, dev_t rdev)
     {
-        const auto full = ensureParentExists(path);
+        const auto full = ensureCacheExists(path);
 
         int res;
 
@@ -186,7 +161,7 @@ public:
 
     int mkdir(const char *path, mode_t mode)
     {
-        const auto full = ensureParentExists(path);
+        const auto full = ensureCacheExists(path);
         const auto remote = src_ / path;
 
         int res;
@@ -206,7 +181,7 @@ public:
 
     int unlink(const char *path)
     {
-        const auto full = ensureExists(path);
+        const auto full = ensureCacheExists(path);
         const auto remote = src_ / path;
 
         int res;
@@ -226,7 +201,7 @@ public:
 
     int rmdir(const char *path)
     {
-        const auto full = ensureParentExists(path);
+        const auto full = ensureCacheExists(path);
         const auto remote = src_ / path;
 
         int res;
@@ -246,7 +221,7 @@ public:
 
     int symlink(const char *from, const char *to)
     {
-        const auto full = ensureParentExists(from);
+        const auto full = ensureCacheExists(from);
 
         int res;
 
@@ -265,7 +240,7 @@ public:
 
     int rename(const char *from, const char *to, unsigned int flags)
     {
-        const auto full = ensureParentExists(from);
+        const auto full = ensureCacheExists(from);
 
         int res;
 
@@ -305,7 +280,7 @@ public:
     int chmod(const char *path, mode_t mode,
                          struct fuse_file_info *fi)
     {
-        const auto full = ensureExists(path);
+        const auto full = ensureCacheExists(path);
 
         (void) fi;
         int res;
@@ -326,7 +301,7 @@ public:
     int chown(const char *path, uid_t uid, gid_t gid,
                          struct fuse_file_info *fi)
     {
-        const auto full = ensureExists(path);
+        const auto full = ensureCacheExists(path);
 
         (void) fi;
         int res;
@@ -347,7 +322,7 @@ public:
     int truncate(const char *path, off_t size,
                             struct fuse_file_info *fi)
     {
-        const auto full = ensureExists(path);
+        const auto full = ensureCacheExists(path);
 
         int res;
 
@@ -366,7 +341,7 @@ public:
     int create(const char *path, mode_t mode,
                           struct fuse_file_info *fi)
     {
-        const auto full = ensureParentExists(path);
+        const auto full = ensureCacheExists(path);
 
         int res;
 
@@ -393,7 +368,7 @@ public:
 
     int open(const char *path, struct fuse_file_info *fi)
     {
-        const auto full = ensureExists(path);
+        const auto full = ensureCacheExists(path);
 
         int res;
 
@@ -408,7 +383,7 @@ public:
     int read(const char *path, char *buf, size_t size, off_t offset,
                         struct fuse_file_info *fi)
     {
-        const auto full = ensureExists(path);
+        const auto full = ensureCacheExists(path);
 
         int fd;
         int res;
@@ -434,7 +409,7 @@ public:
     int write(const char *path, const char *buf, size_t size,
                          off_t offset, struct fuse_file_info *fi)
     {
-        const auto full = ensureExists(path);
+        const auto full = ensureCacheExists(path);
 
         int fd;
         int res;

@@ -84,6 +84,10 @@ private:
                 const auto remote = remote_ / path;
                 const auto local = local_ / path;
 
+                const auto parent = remote.parent_path();
+                if (!boost::filesystem::exists(parent))
+                    boost::filesystem::create_directories(parent);
+
                 boost::filesystem::copy_file(local, remote, boost::filesystem::copy_option::overwrite_if_exists);
             }
             catch (const std::exception& e)
