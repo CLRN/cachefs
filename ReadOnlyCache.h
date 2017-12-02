@@ -17,6 +17,7 @@
 #include <boost/unordered_map.hpp>
 #include <boost/make_shared.hpp>
 #include <boost/optional.hpp>
+#include <boost/algorithm/string/erase.hpp>
 
 class ReadOnlyCache
 {
@@ -57,6 +58,38 @@ public:
         , cache_(cache)
         , readWrite_(readWrite)
     {
+        readCache();
+    }
+
+    void readCache()
+    {
+        boost::filesystem::recursive_directory_iterator it(cache_);
+        boost::filesystem::recursive_directory_iterator end;
+
+        char buffer[4096] = {};
+
+        const auto filler = [](void* buf,
+                               const char* name,
+                               const struct stat* stbuf,
+                               off_t off,
+                               enum fuse_fill_dir_flags flags)
+        {
+            return 1;
+        };
+
+        for (; it != end; ++it)
+        {
+            std::string path = it->path().string();
+            boost::algorithm::erase_all(path, cache_.string());
+
+            struct stat s = {};
+            fuse_file_info info = {};
+            getattr(path.c_str(), &s, &info);
+            access(path.c_str(), 0);
+
+            if (boost::filesystem::is_directory(it->path()))
+                list(path.c_str(), buffer, filler, 0, &info, fuse_readdir_flags());
+        }
     }
 
     CacheEntry::Ptr get(const boost::filesystem::path& path)
@@ -241,7 +274,7 @@ public:
 
         int res;
 
-        res = ::open(full.c_str(), fi->flags);
+        res = ::open(cached.c_str(), fi->flags);
         if (res == -1)
             return -errno;
 
@@ -265,7 +298,7 @@ public:
         int res;
 
         if(fi == NULL)
-            fd = ::open(full.c_str(), O_RDONLY);
+            fd = ::open(cached.c_str(), O_RDONLY);
         else
             fd = fi->fh;
 
