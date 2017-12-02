@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Logger.h"
+
 #include <thread>
 #include <condition_variable>
 #include <iostream>
@@ -24,7 +26,8 @@ public:
     {
         running_ = false;
         cond_.notify_all();
-        worker_.join();
+        if (worker_.joinable())
+            worker_.join();
     }
 
     void start()
@@ -88,7 +91,9 @@ private:
                 if (!boost::filesystem::exists(parent))
                     boost::filesystem::create_directories(parent);
 
+                Logger::instance() << "pushing '" << path << "'" << std::endl;
                 boost::filesystem::copy_file(local, remote, boost::filesystem::copy_option::overwrite_if_exists);
+                Logger::instance() << "push completed" << std::endl;
             }
             catch (const std::exception& e)
             {

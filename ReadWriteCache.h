@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Background.h"
+#include "Logger.h"
 
 #include <errno.h>
 #include <sys/stat.h>
@@ -36,15 +37,28 @@ public:
     {
         namespace fs = boost::filesystem;
 
+        Logger::instance() << "read-write copy '" << sourceDir.string() << "' -> '" << destinationDir.string() << "'" << std::endl;
+
         fs::create_directories(destinationDir);
+
+        boost::system::error_code ignore;
 
         for (const auto& dirEnt : fs::recursive_directory_iterator{sourceDir})
         {
             const auto& path = dirEnt.path();
             auto relativePathStr = path.string();
             boost::replace_first(relativePathStr, sourceDir.string(), "");
-            fs::copy(path, destinationDir / relativePathStr);
+
+            const auto dst = destinationDir / relativePathStr;
+
+            const auto time = boost::filesystem::last_write_time(path);
+
+            fs::copy(path, dst);
+
+            boost::filesystem::last_write_time(dst, time, ignore);
         }
+
+        Logger::instance() << "completed copy '" << sourceDir.string() << "' -> '" << destinationDir.string() << "'" << std::endl;
     }
 
     boost::filesystem::path ensureCacheExists(const char* path)
@@ -430,6 +444,9 @@ public:
         if(fi == NULL)
             close(fd);
 
+        std::unique_lock<std::mutex> lock(mutex_);
+        writtenFiles_.emplace(fd);
+
         return res;
     }
 
@@ -438,7 +455,15 @@ public:
         (void) path;
         close(fi->fh);
 
-        sync_.sync(path);
+        std::unique_lock<std::mutex> lock(mutex_);
+        const auto it = writtenFiles_.find(fi->fh);
+        if (it != writtenFiles_.end())
+        {
+            writtenFiles_.erase(it);
+            lock.unlock();
+
+            sync_.sync(path);
+        }
 
         return 0;
     }
@@ -450,5 +475,8 @@ private:
     const boost::filesystem::path readWrite_;
 
     BackgroundSync sync_;
+
+    std::mutex mutex_;
+    std::set<uint64_t> writtenFiles_;
 };
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Logger.h"
+
 #include <errno.h>
 #include <sys/stat.h>
 #include <cstddef>
@@ -58,11 +60,13 @@ public:
         , cache_(cache)
         , readWrite_(readWrite)
     {
-        readCache();
+        //readCache();
     }
 
     void readCache()
     {
+        Logger::instance() << "reading cache from: " << cache_.string() << std::endl;
+
         boost::filesystem::recursive_directory_iterator it(cache_);
         boost::filesystem::recursive_directory_iterator end;
 
@@ -77,7 +81,7 @@ public:
             return 1;
         };
 
-        for (; it != end; ++it)
+        for (int count; it != end; ++it, ++count)
         {
             std::string path = it->path().string();
             boost::algorithm::erase_all(path, cache_.string());
@@ -85,11 +89,13 @@ public:
             struct stat s = {};
             fuse_file_info info = {};
             getattr(path.c_str(), &s, &info);
-            access(path.c_str(), 0);
+            access(path.c_str(), 4);
 
             if (boost::filesystem::is_directory(it->path()))
                 list(path.c_str(), buffer, filler, 0, &info, fuse_readdir_flags());
         }
+
+        Logger::instance() << "read " << cacheMap_.size() << " items" << std::endl;
     }
 
     CacheEntry::Ptr get(const boost::filesystem::path& path)
@@ -97,7 +103,10 @@ public:
         std::unique_lock<std::mutex> lock(cacheLock_);
         auto it = cacheMap_.find(path);
         if (it == cacheMap_.end())
+        {
             it = cacheMap_.emplace(path, boost::make_shared<CacheEntry>()).first;
+            Logger::instance() << "MISS: " << path.string() << std::endl;
+        }
         return it->second;
     }
 
@@ -170,6 +179,8 @@ public:
         {
             DIR *dp;
             struct dirent *de;
+
+            Logger::instance() << "LISTING " << full.string() << std::endl;
 
             dp = opendir(full.c_str());
             if (dp == NULL)
@@ -268,6 +279,7 @@ public:
 
         if (!boost::filesystem::exists(cached))
         {
+            Logger::instance() << "read-only copy '" << full.string() << "' -> '" << cached.string() << "'" << std::endl;
             boost::filesystem::create_directories(cached.parent_path());
             boost::filesystem::copy_file(full, cached);
         }
@@ -290,6 +302,7 @@ public:
 
         if (!boost::filesystem::exists(cached))
         {
+            Logger::instance() << "read-only copy '" << full.string() << "' -> '" << cached.string() << "'" << std::endl;
             boost::filesystem::create_directories(cached.parent_path());
             boost::filesystem::copy_file(full, cached);
         }

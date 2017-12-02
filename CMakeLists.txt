@@ -3,7 +3,7 @@ project(cachefs)
 
 set(CMAKE_CXX_STANDARD 14)
 
-set(BOOST_COMPONENTS system	filesystem)
+set(BOOST_COMPONENTS system	filesystem date_time)
 find_package(Boost COMPONENTS ${BOOST_COMPONENTS} REQUIRED)
 
 add_definitions(-DFUSE_USE_VERSION=31
